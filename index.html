@@ -1839,25 +1839,52 @@ const sigState = {};
 
 function initSigCanvas(name) {
   const canvas = document.getElementById('sig-' + name + '-canvas');
-  if (!canvas || sigState[name]) return;
-  const ctx = canvas.getContext('2d');
-  // Set actual pixel dimensions
+  if (!canvas) return;
+
+  // 每次都重新設定尺寸（解決手機上 canvas 尺寸不正確問題）
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * window.devicePixelRatio;
-  canvas.height = rect.height * window.devicePixelRatio;
-  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const dpr = window.devicePixelRatio || 1;
+
+  // 用 CSS 設定顯示尺寸
+  const displayW = rect.width || canvas.parentElement.offsetWidth || 300;
+  const displayH = 120;
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+
+  // 用實際像素設定 canvas 解析度
+  canvas.width = displayW * dpr;
+  canvas.height = displayH * dpr;
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
   ctx.strokeStyle = '#1a1a2e';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+
+  // 如果已有事件監聽，先移除舊的（用 clone 方式）
+  const newCanvas = canvas.cloneNode(true);
+  canvas.parentNode.replaceChild(newCanvas, canvas);
+  const c = newCanvas;
+  const context = c.getContext('2d');
+  context.scale(dpr, dpr);
+  context.strokeStyle = '#1a1a2e';
+  context.lineWidth = 2.5;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+
+  sigState[name] = { ctx: context, canvas: c, dpr };
 
   let drawing = false;
   let lastX = 0, lastY = 0;
 
   function getPos(e) {
-    const r = canvas.getBoundingClientRect();
+    const r = c.getBoundingClientRect();
     const touch = e.touches ? e.touches[0] : e;
-    return { x: touch.clientX - r.left, y: touch.clientY - r.top };
+    return {
+      x: (touch.clientX - r.left),
+      y: (touch.clientY - r.top)
+    };
   }
 
   function start(e) {
@@ -1865,43 +1892,42 @@ function initSigCanvas(name) {
     drawing = true;
     const pos = getPos(e);
     lastX = pos.x; lastY = pos.y;
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 1, 0, Math.PI * 2);
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fill();
+    context.beginPath();
+    context.arc(lastX, lastY, 1, 0, Math.PI * 2);
+    context.fillStyle = '#1a1a2e';
+    context.fill();
   }
 
   function draw(e) {
     if (!drawing) return;
     e.preventDefault();
     const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
+    context.beginPath();
+    context.moveTo(lastX, lastY);
+    context.lineTo(pos.x, pos.y);
+    context.stroke();
     lastX = pos.x; lastY = pos.y;
-    // Save to hidden input as base64
-    document.getElementById('f-sig-' + name).value = canvas.toDataURL('image/png');
+    document.getElementById('f-sig-' + name).value = c.toDataURL('image/png');
   }
 
   function stop(e) { drawing = false; }
 
-  canvas.addEventListener('mousedown', start);
-  canvas.addEventListener('mousemove', draw);
-  canvas.addEventListener('mouseup', stop);
-  canvas.addEventListener('mouseleave', stop);
-  canvas.addEventListener('touchstart', start, { passive: false });
-  canvas.addEventListener('touchmove', draw, { passive: false });
-  canvas.addEventListener('touchend', stop);
-
-  sigState[name] = { ctx, canvas };
+  c.addEventListener('mousedown', start);
+  c.addEventListener('mousemove', draw);
+  c.addEventListener('mouseup', stop);
+  c.addEventListener('mouseleave', stop);
+  c.addEventListener('touchstart', start, { passive: false });
+  c.addEventListener('touchmove', draw, { passive: false });
+  c.addEventListener('touchend', stop);
+  c.addEventListener('touchcancel', stop);
 }
 
 function clearSig(name) {
   const s = sigState[name];
-  if (!s) return;
-  const { ctx, canvas } = s;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (s) {
+    const { ctx, canvas, dpr } = s;
+    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+  }
   document.getElementById('f-sig-' + name).value = '';
 }
 
