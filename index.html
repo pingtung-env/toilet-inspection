@@ -1162,7 +1162,7 @@ body {
       <h2>簽名確認</h2>
     </div>
     <div class="card-body">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div style="display:grid;grid-template-columns:1fr;gap:16px;">
         <div>
           <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px;font-weight:500;">受檢單位簽名</div>
           <div style="position:relative;border:1.5px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fafafa;">
@@ -2042,8 +2042,11 @@ async function submitForm() {
     checkedItems.push({ text: el.querySelector('.main').textContent, score: el.dataset.score });
   });
 
-  // Photos: store as base64 in Firestore (since no Storage)
-  const photoData = await Promise.all(photos.map(p => toBase64(p.file)));
+  // 照片壓縮後存（限制每張最大 200KB）
+  const photoData = await Promise.all(photos.map(p => compressPhoto(p.file, 800, 0.6)));
+  // 簽名壓縮（降低解析度）
+  const sigRecvVal = compressSigCanvas('recv');
+  const sigCheckVal = compressSigCanvas('check');
 
   const record = {
     toilet, date,
@@ -2063,8 +2066,8 @@ async function submitForm() {
     photoCount: photos.length,
     photos: photoData,
     checkedItems,
-    sigRecv: document.getElementById('f-sig-recv').value,
-    sigCheck: document.getElementById('f-sig-check').value,
+    sigRecv: sigRecvVal,
+    sigCheck: sigCheckVal,
     submittedBy: currentUser ? currentUser.email : 'unknown',
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   };
@@ -2080,13 +2083,37 @@ async function submitForm() {
   }
 }
 
-function toBase64(file) {
+// 壓縮照片（限制最大寬度，降低品質）
+function compressPhoto(file, maxW, quality) {
   if (!file) return Promise.resolve('');
   return new Promise(res => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.readAsDataURL(file);
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      res(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); res(''); };
+    img.src = url;
   });
+}
+
+// 壓縮簽名 canvas（縮小解析度後輸出）
+function compressSigCanvas(name) {
+  const s = sigState[name];
+  if (!s) return document.getElementById('f-sig-' + name).value || '';
+  const src = s.canvas;
+  const out = document.createElement('canvas');
+  out.width = Math.round(src.width / 2);
+  out.height = Math.round(src.height / 2);
+  out.getContext('2d').drawImage(src, 0, 0, out.width, out.height);
+  return out.toDataURL('image/png', 0.7);
 }
 
 // ── LOAD FROM FIRESTORE ──
